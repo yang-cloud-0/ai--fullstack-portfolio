@@ -1,0 +1,10 @@
+{
+  "version": "v1",
+  "regions": ["华东", "华北", "华南", "全国"],
+  "metrics": [
+    {"id": "order_count", "name": "订单总数", "definition": "已支付、待支付和取消的订单均计入", "unit": "笔", "aliases": ["订单总数", "总订单", "全部订单", "下单量"]},
+    {"id": "paid_orders", "name": "支付订单数", "definition": "只计已支付订单，退款订单仍属于已支付订单", "unit": "笔", "aliases": ["支付订单数", "已支付订单", "成交单量", "成交订单", "支付单量"]},
+    {"id": "net_revenue", "name": "净销售额", "definition": "已支付订单的支付金额减退款金额", "unit": "元", "aliases": ["净销售额", "净营收", "实际销售额"]},
+    {"id": "refund_amount", "name": "退款总额", "definition": "已支付订单的退款金额总和", "unit": "元", "aliases": ["退款总额", "退款金额", "退款额"]}
+  ]
+}
