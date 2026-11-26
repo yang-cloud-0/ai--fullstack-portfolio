@@ -30,6 +30,7 @@ class Plan(BaseModel):
     region: str | None = None
     reason: str
     version: str
+    model_note: str | None = None
 
 
 class State(TypedDict, total=False):
@@ -56,36 +57,70 @@ def retrieve(state: State) -> dict:
     return {"candidates": candidates, "months": months, "regions": regions}
 
 
-def reason_with_model(question: str, metric: dict) -> str:
-    """模型解释已确认的业务口径，查询指标与过滤条件由程序确定。"""
+def model_message(system: str, data: dict, tool: dict | None = None) -> dict:
+    body = {
+        "model": os.environ.get("MODEL_NAME", ""),
+        "max_tokens": 160,
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": json.dumps(data, ensure_ascii=False)},
+        ],
+    }
+    if tool:
+        body["tools"] = [tool]
+        body["tool_choice"] = {"type": "function", "function": {"name": tool["function"]["name"]}}
     response = httpx.post(
         MODEL_ENDPOINT,
         headers={"Authorization": f"Bearer {os.environ.get('MODEL_API_KEY', '')}"},
-        json={
-            "model": os.environ.get("MODEL_NAME", ""),
-            "max_tokens": 160,
-            "messages": [
-                {
-                    "role": "system",
-                    "content": "用一句中文解释给定的指标口径。不要输出查询语句或查询结果。",
-                },
-                {
-                    "role": "user",
-                    "content": json.dumps(
-                        {"question": question, "metric": metric["name"], "definition": metric["definition"]},
-                        ensure_ascii=False,
-                    ),
-                },
-            ],
-        },
+        json=body,
         timeout=httpx.Timeout(4.0),
         follow_redirects=False,
     )
     response.raise_for_status()
-    content = response.json()["choices"][0]["message"]["content"]
+    message = response.json()["choices"][0]["message"]
+    if not isinstance(message, dict):
+        raise ValueError("模型消息格式无效")
+    return message
+
+
+def reason_with_model(question: str, metric: dict) -> str:
+    """模型解释已确认的业务口径，查询指标与过滤条件由程序确定。"""
+    message = model_message(
+        "用一句中文解释给定的指标口径。不要输出查询语句或查询结果。",
+        {"question": question, "metric": metric["name"], "definition": metric["definition"]},
+    )
+    content = message.get("content")
     if not isinstance(content, str) or not content.strip():
         raise ValueError("模型未返回有效的口径说明")
     return content.strip()[:300]
+
+
+def suggest_metric(question: str) -> str | None:
+    """工具仅返回供用户确认的建议，不执行数据库查询。"""
+    metrics = {metric["id"]: metric["name"] for metric in CATALOG["metrics"]}
+    tool = {
+        "type": "function",
+        "function": {
+            "name": "suggest_metric",
+            "description": "建议一个目录内的业务指标，无法判断时返回 unknown",
+            "parameters": {
+                "type": "object",
+                "properties": {"metric": {"type": "string", "enum": [*metrics, "unknown"]}},
+                "required": ["metric"],
+                "additionalProperties": False,
+            },
+        },
+    }
+    message = model_message("从给定目录建议一个指标，避免猜测。", {"question": question, "catalog": metrics}, tool)
+    calls = message["tool_calls"]
+    if len(calls) != 1 or calls[0]["function"]["name"] != "suggest_metric":
+        raise ValueError("模型返回了不受支持的工具")
+    arguments = json.loads(calls[0]["function"]["arguments"])
+    if not isinstance(arguments, dict) or set(arguments) != {"metric"}:
+        raise ValueError("工具参数格式不正确")
+    selected = arguments["metric"]
+    return metrics.get(selected) if isinstance(selected, str) else None
+
 
 
 def prepare_plan(state: State) -> dict:
@@ -100,22 +135,30 @@ def prepare_plan(state: State) -> dict:
 
     base = {"version": CATALOG["version"]}
     if issues:
+        if MODEL_ENDPOINT and not options and len(state["months"]) == len(state["regions"]) == 1:
+            try:
+                suggestion = suggest_metric(state["question"])
+                if suggestion:
+                    issues.append(f"模型建议「{suggestion}」，请在问题中明确指标")
+            except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
+                pass  # 保留确定性的澄清提示，避免失败后重复调用模型。
         return {"plan": Plan(status="clarify", reason="；".join(issues), **base)}
 
     metric = options[0]
-    reason = metric["definition"]
+    model_note = None
     if MODEL_ENDPOINT:
         try:
-            reason = reason_with_model(state["question"], metric)
+            model_note = reason_with_model(state["question"], metric)
         except (httpx.HTTPError, ValueError, KeyError, IndexError, TypeError):
-            reason = f"模型说明暂不可用，采用指标目录口径：{metric['definition']}"
+            model_note = "模型说明暂不可用，采用指标目录口径。"
     return {
         "plan": Plan(
             status="ready",
             metric=metric["id"],
             month=state["months"][0],
             region=state["regions"][0],
-            reason=reason,
+            reason=metric["definition"],
+            model_note=model_note,
             **base,
         )
     }

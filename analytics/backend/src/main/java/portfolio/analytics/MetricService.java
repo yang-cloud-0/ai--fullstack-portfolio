@@ -26,7 +26,7 @@ class MetricService {
 
     record Metric(String name, String unit) {}
     record Result(String metric, String label, String month, String region,
-                  BigDecimal value, String unit, String source, String reason) {}
+                  BigDecimal value, String unit, String source, String reason, String modelNote) {}
 
     private final MetricMapper mapper;
     private final StringRedisTemplate redis;
@@ -58,7 +58,7 @@ class MetricService {
             source = "cache";
         }
         return new Result(plan.metric(), metric.name(), plan.month(), plan.region(), value,
-            metric.unit(), source, plan.reason());
+            metric.unit(), source, plan.reason(), plan.modelNote());
     }
 
     private BigDecimal readCache(String key) {

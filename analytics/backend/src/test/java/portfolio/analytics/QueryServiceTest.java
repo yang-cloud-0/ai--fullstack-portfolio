@@ -74,6 +74,6 @@ class QueryServiceTest {
     }
 
     private AgentClient.Plan plan(String metric) {
-        return new AgentClient.Plan("ready", metric, "2026-11", "华东", "口径说明", "v1");
+        return new AgentClient.Plan("ready", metric, "2026-11", "华东", "口径说明", "v1", null);
     }
 }

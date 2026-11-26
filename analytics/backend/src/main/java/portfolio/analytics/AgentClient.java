@@ -1,5 +1,6 @@
 package portfolio.analytics;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -7,7 +8,8 @@ import org.springframework.web.client.RestClient;
 
 @Component
 class AgentClient {
-    record Plan(String status, String metric, String month, String region, String reason, String version) {}
+    record Plan(String status, String metric, String month, String region, String reason, String version,
+                @JsonProperty("model_note") String modelNote) {}
     record Request(String question) {}
 
     private final RestClient client;
