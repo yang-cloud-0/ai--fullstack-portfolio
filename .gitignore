@@ -12,3 +12,5 @@ target/
 .DS_Store
 config.local.toml
 *.log
+
+*.egg-info/

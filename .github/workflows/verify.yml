@@ -1,0 +1,57 @@
+name: 项目验收
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compose-integration:
+    name: MySQL、Redis 和 SSE 容器联调
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - name: 启动问数项目
+        run: docker compose up --build -d
+      - name: 等待网关和接口
+        run: |
+          for attempt in $(seq 1 90); do
+            status="$(curl --max-time 2 -s -o /dev/null -w '%{http_code}' http://127.0.0.1:5173/api/runs/readiness || true)"
+            if [ "$status" = 404 ]; then exit 0; fi
+            sleep 2
+          done
+          exit 1
+      - name: 核对 MySQL 数据
+        run: |
+          count="$(docker compose exec -T -e MYSQL_PWD=local-demo-password mysql mysql -uanalytics -N -B analytics -e 'SELECT COUNT(*) FROM demo_order')"
+          test "$count" = 7
+      - name: 验证 SSE 回放和缓存
+        run: |
+          python3 -m venv .ci-venv
+          .ci-venv/bin/python -m pip install 'httpx>=0.27,<1'
+          .ci-venv/bin/python analytics/scripts/smoke.py --base-url http://127.0.0.1:5173 --expect-redis
+      - name: 查看容器日志
+        if: failure()
+        run: docker compose logs --no-color
+      - name: 清理本次测试容器
+        if: always()
+        run: docker compose down -v
+  terminal-regression:
+    name: 终端两种协议与 TUI 回归
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: mewcode
+    steps:
+      - uses: actions/checkout@v4
+      - name: 安装测试环境
+        run: |
+          python3 -m venv .venv
+          .venv/bin/python -m pip install -e '.[test]'
+      - name: 回放协议和终端交互
+        run: .venv/bin/python -m pytest -q
